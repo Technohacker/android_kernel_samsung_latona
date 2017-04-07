@@ -178,7 +178,8 @@ void audit_panic(const char *message)
 	case AUDIT_FAIL_SILENT:
 		break;
 	case AUDIT_FAIL_PRINTK:
-		printk(KERN_ERR "audit: %s\n", message);
+		if (printk_ratelimit())
+			printk(KERN_ERR "audit: %s\n", message);
 		break;
 	case AUDIT_FAIL_PANIC:
 		/* test audit_pid since printk is always losey, why bother? */
@@ -248,6 +249,7 @@ void audit_log_lost(const char *message)
 	}
 
 	if (print) {
+		if (printk_ratelimit())
 			printk(KERN_WARNING
 				"audit: audit_lost=%d audit_rate_limit=%d "
 				"audit_backlog_limit=%d\n",
@@ -382,7 +384,10 @@ static void audit_printk_skb(struct sk_buff *skb)
 	char *data = NLMSG_DATA(nlh);
 
 	if (nlh->nlmsg_type != AUDIT_EOE) {
-		printk(KERN_NOTICE "type=%d %s\n", nlh->nlmsg_type, data);
+		if (printk_ratelimit())
+			printk(KERN_NOTICE "type=%d %s\n", nlh->nlmsg_type, data);
+		else
+			audit_log_lost("printk limit exceeded\n");
 	}
 
 	audit_hold_skb(skb);
@@ -593,13 +598,13 @@ static int audit_netlink_ok(struct sk_buff *skb, u16 msg_type)
 	case AUDIT_TTY_SET:
 	case AUDIT_TRIM:
 	case AUDIT_MAKE_EQUIV:
-		if (security_netlink_recv(skb, CAP_AUDIT_CONTROL))
+		if (!capable(CAP_AUDIT_CONTROL))
 			err = -EPERM;
 		break;
 	case AUDIT_USER:
 	case AUDIT_FIRST_USER_MSG ... AUDIT_LAST_USER_MSG:
 	case AUDIT_FIRST_USER_MSG2 ... AUDIT_LAST_USER_MSG2:
-		if (security_netlink_recv(skb, CAP_AUDIT_WRITE))
+		if (!capable(CAP_AUDIT_WRITE))
 			err = -EPERM;
 		break;
 	default:  /* bad msg */
@@ -1170,7 +1175,7 @@ struct audit_buffer *audit_log_start(struct audit_context *ctx, gfp_t gfp_mask,
 			remove_wait_queue(&audit_backlog_wait, &wait);
 			continue;
 		}
-		if (audit_rate_check())
+		if (audit_rate_check() && printk_ratelimit())
 			printk(KERN_WARNING
 			       "audit: audit_backlog=%d > "
 			       "audit_backlog_limit=%d\n",
@@ -1414,7 +1419,7 @@ void audit_log_d_path(struct audit_buffer *ab, const char *prefix,
 	char *p, *pathname;
 
 	if (prefix)
-		audit_log_format(ab, " %s", prefix);
+		audit_log_format(ab, "%s", prefix);
 
 	/* We will allow 11 spaces for ' (deleted)' to be appended */
 	pathname = kmalloc(PATH_MAX+11, ab->gfp_mask);

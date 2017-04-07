@@ -231,13 +231,29 @@ static void dump_common_audit_data(struct audit_buffer *ab,
 	case LSM_AUDIT_DATA_PATH: {
 		struct inode *inode;
 
-		audit_log_d_path(ab, "path=", &a->u.path);
+		audit_log_d_path(ab, " path=", &a->u.path);
 
 		inode = a->u.path.dentry->d_inode;
-		if (inode)
-			audit_log_format(ab, " dev=%s ino=%lu",
-					inode->i_sb->s_id,
-					inode->i_ino);
+		if (inode) {
+			audit_log_format(ab, " dev=");
+			audit_log_untrustedstring(ab, inode->i_sb->s_id);
+			audit_log_format(ab, " ino=%lu", inode->i_ino);
+		}
+		break;
+	}
+	case LSM_AUDIT_DATA_IOCTL_OP: {
+		struct inode *inode;
+
+		audit_log_d_path(ab, " path=", &a->u.op->path);
+
+		inode = a->u.op->path.dentry->d_inode;
+		if (inode) {
+			audit_log_format(ab, " dev=");
+			audit_log_untrustedstring(ab, inode->i_sb->s_id);
+			audit_log_format(ab, " ino=%lu", inode->i_ino);
+		}
+
+		audit_log_format(ab, " ioctlcmd=%hx", a->u.op->cmd);
 		break;
 	}
 	case LSM_AUDIT_DATA_DENTRY: {
@@ -247,10 +263,11 @@ static void dump_common_audit_data(struct audit_buffer *ab,
 		audit_log_untrustedstring(ab, a->u.dentry->d_name.name);
 
 		inode = a->u.dentry->d_inode;
-		if (inode)
-			audit_log_format(ab, " dev=%s ino=%lu",
-					inode->i_sb->s_id,
-					inode->i_ino);
+		if (inode) {
+			audit_log_format(ab, " dev=");
+			audit_log_untrustedstring(ab, inode->i_sb->s_id);
+			audit_log_format(ab, " ino=%lu", inode->i_ino);
+		}
 		break;
 	}
 	case LSM_AUDIT_DATA_INODE: {
@@ -265,8 +282,9 @@ static void dump_common_audit_data(struct audit_buffer *ab,
 					 dentry->d_name.name);
 			dput(dentry);
 		}
-		audit_log_format(ab, " dev=%s ino=%lu", inode->i_sb->s_id,
-				 inode->i_ino);
+		audit_log_format(ab, " dev=");
+		audit_log_untrustedstring(ab, inode->i_sb->s_id);
+		audit_log_format(ab, " ino=%lu", inode->i_ino);
 		break;
 	}
 	case LSM_AUDIT_DATA_TASK:
@@ -314,7 +332,7 @@ static void dump_common_audit_data(struct audit_buffer *ab,
 						.dentry = u->dentry,
 						.mnt = u->mnt
 					};
-					audit_log_d_path(ab, "path=", &path);
+					audit_log_d_path(ab, " path=", &path);
 					break;
 				}
 				if (!u->addr)
@@ -378,11 +396,15 @@ static void dump_common_audit_data(struct audit_buffer *ab,
 /**
  * common_lsm_audit - generic LSM auditing function
  * @a:  auxiliary audit data
+ * @pre_audit: lsm-specific pre-audit callback
+ * @post_audit: lsm-specific post-audit callback
  *
  * setup the audit buffer for common security information
  * uses callback to print LSM specific information
  */
-void common_lsm_audit(struct common_audit_data *a)
+void common_lsm_audit(struct common_audit_data *a,
+	void (*pre_audit)(struct audit_buffer *, void *),
+	void (*post_audit)(struct audit_buffer *, void *))
 {
 	struct audit_buffer *ab;
 
@@ -394,13 +416,13 @@ void common_lsm_audit(struct common_audit_data *a)
 	if (ab == NULL)
 		return;
 
-	if (a->lsm_pre_audit)
-		a->lsm_pre_audit(ab, a);
+	if (pre_audit)
+		pre_audit(ab, a);
 
 	dump_common_audit_data(ab, a);
 
-	if (a->lsm_post_audit)
-		a->lsm_post_audit(ab, a);
+	if (post_audit)
+		post_audit(ab, a);
 
 	audit_log_end(ab);
 }

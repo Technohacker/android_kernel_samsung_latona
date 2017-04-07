@@ -53,8 +53,8 @@ struct user_namespace;
  * These functions are in security/capability.c and are used
  * as the default capabilities functions
  */
-extern int cap_capable(struct task_struct *tsk, const struct cred *cred,
-		       struct user_namespace *ns, int cap, int audit);
+extern int cap_capable(const struct cred *cred, struct user_namespace *ns,
+		       int cap, int audit);
 extern int cap_settime(const struct timespec *ts, const struct timezone *tz);
 extern int cap_ptrace_access_check(struct task_struct *child, unsigned int mode);
 extern int cap_ptrace_traceme(struct task_struct *parent);
@@ -95,7 +95,6 @@ struct xfrm_user_sec_ctx;
 struct seq_file;
 
 extern int cap_netlink_send(struct sock *sk, struct sk_buff *skb);
-extern int cap_netlink_recv(struct sk_buff *skb, int cap);
 
 void reset_security_ops(void);
 
@@ -680,6 +679,12 @@ static inline void security_free_mnt_opts(struct security_mnt_opts *opts)
  *	userspace to load a kernel module with the given name.
  *	@kmod_name name of the module requested by the kernel
  *	Return 0 if successful.
+ * @kernel_module_from_file:
+ *	Load a kernel module from userspace.
+ *	@file contains the file structure pointing to the file containing
+ *	the kernel module to load. If the module is being loaded from a blob,
+ *	this argument will be NULL.
+ *	Return 0 if permission is granted.
  * @task_fix_setuid:
  *	Update the module's state after setting one or more of the user
  *	identity attributes of the current process.  The @flags parameter
@@ -792,12 +797,6 @@ static inline void security_free_mnt_opts(struct security_mnt_opts *opts)
  *	@skb contains the sk_buff structure for the netlink message.
  *	Return 0 if the information was successfully saved and message
  *	is allowed to be transmitted.
- * @netlink_recv:
- *	Check permission before processing the received netlink message in
- *	@skb.
- *	@skb contains the sk_buff structure for the netlink message.
- *	@cap indicates the capability required
- *	Return 0 if permission is granted.
  *
  * Security hooks for Unix domain networking.
  *
@@ -1261,7 +1260,6 @@ static inline void security_free_mnt_opts(struct security_mnt_opts *opts)
  * @capable:
  *	Check whether the @tsk process has the @cap capability in the indicated
  *	credentials.
- *	@tsk contains the task_struct for the process.
  *	@cred contains the credentials to use.
  *      @ns contains the user namespace we want the capability in
  *	@cap contains the capability <include/linux/capability.h>.
@@ -1390,8 +1388,8 @@ struct security_operations {
 		       const kernel_cap_t *effective,
 		       const kernel_cap_t *inheritable,
 		       const kernel_cap_t *permitted);
-	int (*capable) (struct task_struct *tsk, const struct cred *cred,
-			struct user_namespace *ns, int cap, int audit);
+	int (*capable) (const struct cred *cred, struct user_namespace *ns,
+			int cap, int audit);
 	int (*quotactl) (int cmds, int type, int id, struct super_block *sb);
 	int (*quota_on) (struct dentry *dentry);
 	int (*syslog) (int type);
@@ -1411,8 +1409,8 @@ struct security_operations {
 	int (*sb_kern_mount) (struct super_block *sb, int flags, void *data);
 	int (*sb_show_options) (struct seq_file *m, struct super_block *sb);
 	int (*sb_statfs) (struct dentry *dentry);
-	int (*sb_mount) (char *dev_name, struct path *path,
-			 char *type, unsigned long flags, void *data);
+	int (*sb_mount) (const char *dev_name, struct path *path,
+			 const char *type, unsigned long flags, void *data);
 	int (*sb_umount) (struct vfsmount *mnt, int flags);
 	int (*sb_pivotroot) (struct path *old_path,
 			     struct path *new_path);
@@ -1508,6 +1506,7 @@ struct security_operations {
 	int (*kernel_act_as)(struct cred *new, u32 secid);
 	int (*kernel_create_files_as)(struct cred *new, struct inode *inode);
 	int (*kernel_module_request)(char *kmod_name);
+	int (*kernel_module_from_file)(struct file *file);
 	int (*task_fix_setuid) (struct cred *new, const struct cred *old,
 				int flags);
 	int (*task_setpgid) (struct task_struct *p, pid_t pgid);
@@ -1562,7 +1561,6 @@ struct security_operations {
 			  struct sembuf *sops, unsigned nsops, int alter);
 
 	int (*netlink_send) (struct sock *sk, struct sk_buff *skb);
-	int (*netlink_recv) (struct sk_buff *skb, int cap);
 
 	void (*d_instantiate) (struct dentry *dentry, struct inode *inode);
 
@@ -1701,8 +1699,8 @@ int security_sb_remount(struct super_block *sb, void *data);
 int security_sb_kern_mount(struct super_block *sb, int flags, void *data);
 int security_sb_show_options(struct seq_file *m, struct super_block *sb);
 int security_sb_statfs(struct dentry *dentry);
-int security_sb_mount(char *dev_name, struct path *path,
-		      char *type, unsigned long flags, void *data);
+int security_sb_mount(const char *dev_name, struct path *path,
+		      const char *type, unsigned long flags, void *data);
 int security_sb_umount(struct vfsmount *mnt, int flags);
 int security_sb_pivotroot(struct path *old_path, struct path *new_path);
 int security_sb_set_mnt_opts(struct super_block *sb, struct security_mnt_opts *opts);
@@ -1769,6 +1767,7 @@ void security_transfer_creds(struct cred *new, const struct cred *old);
 int security_kernel_act_as(struct cred *new, u32 secid);
 int security_kernel_create_files_as(struct cred *new, struct inode *inode);
 int security_kernel_module_request(char *kmod_name);
+int security_kernel_module_from_file(struct file *file);
 int security_task_fix_setuid(struct cred *new, const struct cred *old,
 			     int flags);
 int security_task_setpgid(struct task_struct *p, pid_t pgid);
@@ -1816,7 +1815,6 @@ void security_d_instantiate(struct dentry *dentry, struct inode *inode);
 int security_getprocattr(struct task_struct *p, char *name, char **value);
 int security_setprocattr(struct task_struct *p, char *name, void *value, size_t size);
 int security_netlink_send(struct sock *sk, struct sk_buff *skb);
-int security_netlink_recv(struct sk_buff *skb, int cap);
 int security_secid_to_secctx(u32 secid, char **secdata, u32 *seclen);
 int security_secctx_to_secid(const char *secdata, u32 seclen, u32 *secid);
 void security_release_secctx(char *secdata, u32 seclen);
@@ -1897,7 +1895,7 @@ static inline int security_capset(struct cred *new,
 static inline int security_capable(struct user_namespace *ns,
 				   const struct cred *cred, int cap)
 {
-	return cap_capable(current, cred, ns, cap, SECURITY_CAP_AUDIT);
+	return cap_capable(cred, ns, cap, SECURITY_CAP_AUDIT);
 }
 
 static inline int security_real_capable(struct task_struct *tsk, struct user_namespace *ns, int cap)
@@ -1905,7 +1903,7 @@ static inline int security_real_capable(struct task_struct *tsk, struct user_nam
 	int ret;
 
 	rcu_read_lock();
-	ret = cap_capable(tsk, __task_cred(tsk), ns, cap, SECURITY_CAP_AUDIT);
+	ret = cap_capable(__task_cred(tsk), ns, cap, SECURITY_CAP_AUDIT);
 	rcu_read_unlock();
 	return ret;
 }
@@ -1916,8 +1914,7 @@ int security_real_capable_noaudit(struct task_struct *tsk, struct user_namespace
 	int ret;
 
 	rcu_read_lock();
-	ret = cap_capable(tsk, __task_cred(tsk), ns, cap,
-			       SECURITY_CAP_NOAUDIT);
+	ret = cap_capable(__task_cred(tsk), ns, cap, SECURITY_CAP_NOAUDIT);
 	rcu_read_unlock();
 	return ret;
 }
@@ -2020,8 +2017,8 @@ static inline int security_sb_statfs(struct dentry *dentry)
 	return 0;
 }
 
-static inline int security_sb_mount(char *dev_name, struct path *path,
-				    char *type, unsigned long flags,
+static inline int security_sb_mount(const char *dev_name, struct path *path,
+				    const char *type, unsigned long flags,
 				    void *data)
 {
 	return 0;
@@ -2327,6 +2324,11 @@ static inline int security_kernel_module_request(char *kmod_name)
 	return 0;
 }
 
+static inline int security_kernel_module_from_file(struct file *file)
+{
+	return 0;
+}
+
 static inline int security_task_fix_setuid(struct cred *new,
 					   const struct cred *old,
 					   int flags)
@@ -2532,11 +2534,6 @@ static inline int security_setprocattr(struct task_struct *p, char *name, void *
 static inline int security_netlink_send(struct sock *sk, struct sk_buff *skb)
 {
 	return cap_netlink_send(sk, skb);
-}
-
-static inline int security_netlink_recv(struct sk_buff *skb, int cap)
-{
-	return cap_netlink_recv(skb, cap);
 }
 
 static inline int security_secid_to_secctx(u32 secid, char **secdata, u32 *seclen)

@@ -36,6 +36,7 @@
 #include "tf_conn.h"
 
 #ifdef CONFIG_TF_ZEBRA
+#include "tf_zebra.h"
 #include "tf_crypto.h"
 #endif
 
@@ -794,15 +795,6 @@ int tf_open_client_session(
 		if (connection->owner == TF_CONNECTION_OWNER_KERNEL) {
 			dprintk(KERN_DEBUG "tf_open_client_session: "
 				"TF_LOGIN_PRIVILEGED for kernel API\n");
-		} else if ((current_euid() != TF_PRIVILEGED_UID_GID) &&
-			   (current_egid() != TF_PRIVILEGED_UID_GID) &&
-			   (current_euid() != 0) && (current_egid() != 0)) {
-			dprintk(KERN_ERR "tf_open_client_session: "
-				" user %d, group %d not allowed to open "
-				"session with TF_LOGIN_PRIVILEGED\n",
-				current_euid(), current_egid());
-			error = -EACCES;
-			goto error;
 		} else {
 			dprintk(KERN_DEBUG "tf_open_client_session: "
 				"TF_LOGIN_PRIVILEGED for %u:%u\n",
@@ -1123,11 +1115,6 @@ error:
 
 }
 
-
-#ifdef CONFIG_TF_ION
-extern struct ion_device *omap_ion_device;
-#endif /* CONFIG_TF_ION */
-
 /*
  * Invokes a client command to the Secure World
  */
@@ -1187,9 +1174,9 @@ int tf_invoke_client_command(
 
 			if (connection->ion_client == NULL) {
 				connection->ion_client = ion_client_create(
-					omap_ion_device,
+					zebra_ion_device,
 					(1 << ION_HEAP_TYPE_CARVEOUT),
-					"smc");
+					"tf");
 			}
 			if (connection->ion_client == NULL) {
 				dprintk(KERN_ERR "%s(%p): "
